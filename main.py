@@ -7,6 +7,8 @@ import pandas as pd
 from openpyxl import load_workbook
 import datetime as dt
 
+
+
 QUOTE_IDS_TRACKER = []
 
 templates = Jinja2Templates(directory="templates/")
