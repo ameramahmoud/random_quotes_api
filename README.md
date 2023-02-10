@@ -1,4 +1,4 @@
-# random_quotes_api
+# Random_Quotes_Api
 1. Activate virtual environment 
 
 2. Run the requirements file to install dependencies

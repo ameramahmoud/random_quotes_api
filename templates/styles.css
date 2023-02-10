@@ -1,10 +1,4 @@
-/*
-*
-* ==========================================
-* CUSTOM UTIL CLASSES
-* ==========================================
-*
-*/
+
 .blockquote-custom {
     position: relative;
     font-size: 1.1rem;
@@ -22,15 +16,7 @@
     left: 50px;
   }
   
-  
-  
-  /*
-  *
-  * ==========================================
-  * FOR DEMO PURPOSES
-  * ==========================================
-  *
-  */
+
   body {
     background: #eff0eb;
     background-image: url('https://i.postimg.cc/MTbfnkj6/bg.png');
