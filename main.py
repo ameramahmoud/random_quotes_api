@@ -1,18 +1,135 @@
-from fastapi import FastAPI, Path, Query, HTTPException, status, Form, Depends
+from fastapi import FastAPI, HTTPException, status, Form, Depends
 from fastapi.responses import JSONResponse
 from fastapi.requests import Request
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from random import randint
 import pandas as pd
 from openpyxl import load_workbook
-import datetime as dt
+from datetime import datetime, timedelta
+from jose import JWTError, jwt
+from passlib.context import CryptContext 
 
-
+SECRET_KEY = "c6d620d028531f611b1cf051f6453803cbf5b7e80894d4ec352b014cd9ac110b"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 QUOTE_IDS_TRACKER = []
 
 templates = Jinja2Templates(directory="templates/")
 
+app = FastAPI()
+
+db = {
+    "shebak@2023": {
+    "username": "shebak@2023",
+    "full_name": "shebak",
+    "email": "emaill@gmail.com",
+    "hashed_password": "$2b$12$vYaBSjadpnRoN6HXgFwZU.RGC/TgA9vDR4P6A7Ri.Hv4ecL6EFAuy", 
+    "disabled": False
+    }
+}
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: str or None = None
+
+class User(BaseModel):
+    username: str
+    email: str or None = None
+    full_name: str or None = None
+    disabled: bool or None = None
+
+class UserInDB(User):
+    hashed_password: str
+
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated= "auto")
+oauth_2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def get_user(db, username: str):
+    if username in db:
+        user_data = db[username]
+        return UserInDB(**user_data)
+    
+def authenticate_user(db, username: str, password: str):
+    user = get_user(db, username)
+    if not user:
+        return False
+    if not verify_password(password, user.hashed_password):
+        return False
+    
+    return user
+
+def create_access_token(data: dict, expires_delta: timedelta or None = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm= ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth_2_scheme)):
+    credential_exception = HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
+                                        detail="You are not authorized to use this API", headers={"WWW-Authenticate": "Bearer"})
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credential_exception
+        token_data = TokenData(username=username)
+    except JWTError:
+        raise credential_exception
+    
+    user = get_user(db, username=token_data.username)
+    if user is None:
+        raise credential_exception
+    return user
+
+async def get_current_active_user(current_user: UserInDB = Depends(get_current_user)):
+    if current_user.disabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
+    return current_user
+
+@app.post("/token", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm=Depends()):
+    user = authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
+                            detail="Incorrect username or password", headers={"WWW-Authenticate": "Bearer"})
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires)
+    return{"access_token": access_token, "token_type": "bearer"}
+
+# pwd = get_password_hash("shebak2023")
+# print(pwd)
+
+
+
+########################################################
+
+
+
+
+
+
+
+########################################################
 
 def generate_random_number(data):
     min_quote_id = data.id.min()
@@ -21,7 +138,7 @@ def generate_random_number(data):
     return random_id
 
 def create_report():
-    current_date_time = str(dt.datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
+    current_date_time = str(datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
     spreadsheet_name = "quotes_api_report_" + current_date_time + ".xlsx"
 
     pd.Series(QUOTE_IDS_TRACKER).value_counts().to_excel(spreadsheet_name) 
@@ -32,13 +149,8 @@ def create_report():
     wb.save(filename = spreadsheet_name)
     QUOTE_IDS_TRACKER.clear()
 
-
-#################################################
-    
-app = FastAPI()
-    
 @app.get("/quote/random", response_class=JSONResponse)
-def get_random_quote(request: Request):
+async def get_random_quote(request: Request, current_user: User = Depends(get_current_active_user)):
     """
     Generates a random quote ID and displays it along with the quote and the author
     """
@@ -61,3 +173,5 @@ def get_random_quote(request: Request):
         create_report()
         
     return templates.TemplateResponse("index.html", {"request": request, "quoteId": resulted_quote_id, "quote": resulted_quote, "author": resulted_author})
+
+
