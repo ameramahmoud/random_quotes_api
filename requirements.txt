@@ -3,4 +3,6 @@ uvicorn
 pandas
 openpyxl
 jinja2
-multipart
+python-multipart
+python-jose[cryptography]
+passlib[bcrypt]
