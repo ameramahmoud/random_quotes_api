@@ -1,7 +1,6 @@
-from fastapi import FastAPI, HTTPException, status, Form, Depends
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import Response, RedirectResponse
 from fastapi.requests import Request
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from random import randint
@@ -11,6 +10,7 @@ from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext 
 
+
 SECRET_KEY = "c6d620d028531f611b1cf051f6453803cbf5b7e80894d4ec352b014cd9ac110b"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
@@ -18,6 +18,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 QUOTE_IDS_TRACKER = []
 
 templates = Jinja2Templates(directory="templates/")
+
+msg = None
 
 app = FastAPI()
 
@@ -27,7 +29,6 @@ db = {
     "full_name": "shebak",
     "email": "emaill@gmail.com",
     "hashed_password": "$2b$12$vYaBSjadpnRoN6HXgFwZU.RGC/TgA9vDR4P6A7Ri.Hv4ecL6EFAuy", 
-    "disabled": False
     }
 }
 
@@ -49,7 +50,6 @@ class UserInDB(User):
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated= "auto")
-oauth_2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
 def verify_password(plain_password, hashed_password):
@@ -83,38 +83,22 @@ def create_access_token(data: dict, expires_delta: timedelta or None = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm= ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth_2_scheme)):
+async def get_current_user(token: str):
     credential_exception = HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
                                         detail="You are not authorized to use this API", headers={"WWW-Authenticate": "Bearer"})
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
-            raise credential_exception
+            return credential_exception
         token_data = TokenData(username=username)
     except JWTError:
-        raise credential_exception
+        return credential_exception
     
     user = get_user(db, username=token_data.username)
     if user is None:
-        raise credential_exception
+        return credential_exception
     return user
-
-async def get_current_active_user(current_user: UserInDB = Depends(get_current_user)):
-    if current_user.disabled:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
-    return current_user
-
-@app.post("/token", response_model=Token)
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm=Depends()):
-    user = authenticate_user(db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
-                            detail="Incorrect username or password", headers={"WWW-Authenticate": "Bearer"})
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires)
-    return{"access_token": access_token, "token_type": "bearer"}
 
 # pwd = get_password_hash("shebak2023")
 # print(pwd)
@@ -124,20 +108,69 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm=Depends())
 ########################################################
 
 
+@app.get("/login")
+def login(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
 
 
+@app.post("/login")
+async def login (response: Response, request: Request):
+    form = await request.form()
+    user = authenticate_user(db, form.get("username"), (form.get("password")))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, 
+                            detail="You are not authorized to use this API", headers={"WWW-Authenticate": "Bearer"})
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires)
 
+    response = RedirectResponse(f"/quote/random")
+    response.set_cookie(key="access_token", value=f"Bearer {access_token}", httponly=True)
+    return response
 
 
 ########################################################
 
 def generate_random_number(data):
+    """
+    generates a random number within range of the recieved data
+    """
     min_quote_id = data.id.min()
     max_quote_id = data.id.max()
     random_id = randint(min_quote_id, max_quote_id)
     return random_id
 
+def generate_random_quote():
+    """
+    generates a random quote ID and displays it along with the quote and the author
+    """
+
+    json_quotes_data = pd.read_json("quotes.json")
+    json_authors_data = pd.read_json("authors.json")
+
+    random_id = generate_random_number(json_quotes_data)
+
+    resulted_quote = json_quotes_data.loc[(json_quotes_data.id == random_id)]
+
+    resulted_quote_id = str(resulted_quote.id.values[0])
+    resulted_quote = str(resulted_quote.quote.values[0])
+    
+    QUOTE_IDS_TRACKER.append(resulted_quote_id)
+
+    for index, qoute_ids_lists in enumerate(json_authors_data["quoteIds"]):
+        if random_id in qoute_ids_lists:
+            resulted_author = str(json_authors_data.iloc[index].author)
+            
+    if len(QUOTE_IDS_TRACKER) == 100:
+        create_report()
+        
+    return resulted_quote_id, resulted_quote, resulted_author
+
+
 def create_report():
+    """
+    creates an excel sheet of each quote id and its number of occurences
+    """
     current_date_time = str(datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
     spreadsheet_name = "quotes_api_report_" + current_date_time + ".xlsx"
 
@@ -149,29 +182,29 @@ def create_report():
     wb.save(filename = spreadsheet_name)
     QUOTE_IDS_TRACKER.clear()
 
-@app.get("/quote/random", response_class=JSONResponse)
-async def get_random_quote(request: Request, current_user: User = Depends(get_current_active_user)):
-    """
-    Generates a random quote ID and displays it along with the quote and the author
-    """
-    json_quotes_data = pd.read_json("quotes.json")
-    json_authors_data = pd.read_json("authors.json")
 
-    random_id = generate_random_number(json_quotes_data)
+async def check_authorization_token(request: Request):
+    token = request.cookies.get("access_token") #get token from cookies
+    if token is None: #if token doesn't exist
+        return {"message ": "you are not authorized to use this api"}
+    
+    scheme, _, param = token.partition(" ") #separate 'bearer' from token
+    user = await get_current_user(param)
+    if user: #decode the token 
+        resulted_quote_id, resulted_quote, resulted_author = generate_random_quote()
+        print(resulted_quote_id, resulted_quote, resulted_author)
+        return templates.TemplateResponse("index.html", {"request": request, "quoteId": resulted_quote_id, "quote": resulted_quote, "author": resulted_author})
+    return {"message ": "you are not authorized to use this api"}
 
-    resulted_quote = json_quotes_data.loc[(json_quotes_data.id == random_id)]
 
-    resulted_quote_id = str(resulted_quote.id.values[0])
-    QUOTE_IDS_TRACKER.append(resulted_quote_id)
-    resulted_quote = str(resulted_quote.quote.values[0])
+@app.get("/quote/random")
+async def get_random_quote(request: Request):
 
-    for index, qoute_ids_lists in enumerate(json_authors_data["quoteIds"]):
-        if random_id in qoute_ids_lists:
-            resulted_author = str(json_authors_data.iloc[index].author)
-            
-    if len(QUOTE_IDS_TRACKER) == 100:
-        create_report()
-        
-    return templates.TemplateResponse("index.html", {"request": request, "quoteId": resulted_quote_id, "quote": resulted_quote, "author": resulted_author})
+    return await check_authorization_token(request)
 
+    
+@app.post("/quote/random")
+async def generate_auth_quote(request: Request):
+    form = await request.form() #press button
+    return await check_authorization_token(request)
 
