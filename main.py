@@ -138,8 +138,8 @@ def generate_random_quote():
     generates a random quote ID and displays it along with the quote and the author
     """
 
-    json_quotes_data = pd.read_json("quotes.json")
-    json_authors_data = pd.read_json("authors.json")
+    json_quotes_data = pd.read_json("files/quotes.json")
+    json_authors_data = pd.read_json("files/authors.json")
 
     random_id = generate_random_number(json_quotes_data)
 
