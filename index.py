@@ -9,7 +9,7 @@ import pandas as pd
 from openpyxl import load_workbook
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
-from passlib.context import CryptContext 
+from passlib.context import CryptContext
 
 SECRET_KEY = "c6d620d028531f611b1cf051f6453803cbf5b7e80894d4ec352b014cd9ac110b"
 ALGORITHM = "HS256"
@@ -27,9 +27,18 @@ db = {
     "full_name": "shebak",
     "email": "emaill@gmail.com",
     "hashed_password": "$2b$12$vYaBSjadpnRoN6HXgFwZU.RGC/TgA9vDR4P6A7Ri.Hv4ecL6EFAuy", 
-    "disabled": False
+    "authorized": True,
+    },
+    
+    "shebak@2022": {
+    "username": "shebak@2022",
+    "full_name": "shebak",
+    "email": "emaill@gmail.com",
+    "hashed_password": "$2b$12$0sg92x4IRi5VLEAPWdnTnOkrXfqBKkCDVbhXn8y81avCLcYGqzdHe", 
+    "authorized": False,
     }
 }
+
 
 class Token(BaseModel):
     access_token: str
@@ -42,7 +51,7 @@ class User(BaseModel):
     username: str
     email: str or None = None
     full_name: str or None = None
-    disabled: bool or None = None
+    authorized: bool or None = None
 
 class UserInDB(User):
     hashed_password: str
@@ -101,11 +110,11 @@ async def get_current_user(token: str = Depends(oauth_2_scheme)):
     return user
 
 async def get_current_active_user(current_user: UserInDB = Depends(get_current_user)):
-    if current_user.disabled:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
+    if not current_user.authorized:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to use this API")
     return current_user
 
-@app.post("/token", response_model=Token)
+@app.post("/token", response_model=Token, include_in_schema=False)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm=Depends()):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
@@ -122,6 +131,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm=Depends())
 
 ########################################################
 
+
 def generate_random_number(data):
     """
     generates a random number within range of the recieved data
@@ -135,7 +145,6 @@ def generate_random_quote():
     """
     generates a random quote ID and displays it along with the quote and the author
     """
-
     json_quotes_data = pd.read_json("quotes.json")
     json_authors_data = pd.read_json("authors.json")
 
@@ -176,6 +185,6 @@ def create_report():
 
 @app.get("/quote/random", response_class=JSONResponse)
 async def get_random_quote(current_user: User = Depends(get_current_active_user)):
-
+    
     resulted_quote_id, resulted_quote, resulted_author = generate_random_quote()
     return {"quoteId": resulted_quote_id, "quote": resulted_quote, "author": resulted_author}
