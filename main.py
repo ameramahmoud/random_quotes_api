@@ -19,8 +19,6 @@ QUOTE_IDS_TRACKER = []
 
 templates = Jinja2Templates(directory="templates/")
 
-msg = None
-
 app = FastAPI()
 
 db = {
@@ -43,14 +41,11 @@ class User(BaseModel):
     username: str
     email: str or None = None
     full_name: str or None = None
-    disabled: bool or None = None
 
 class UserInDB(User):
     hashed_password: str
 
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated= "auto")
-
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -103,8 +98,6 @@ async def get_current_user(token: str):
 # pwd = get_password_hash("shebak2023")
 # print(pwd)
 
-
-
 ########################################################
 
 
@@ -128,8 +121,8 @@ async def login (response: Response, request: Request):
     response.set_cookie(key="access_token", value=f"Bearer {access_token}", httponly=True)
     return response
 
-
 ########################################################
+
 
 def generate_random_number(data):
     """
@@ -184,27 +177,24 @@ def create_report():
 
 
 async def check_authorization_token(request: Request):
-    token = request.cookies.get("access_token") #get token from cookies
-    if token is None: #if token doesn't exist
+    token = request.cookies.get("access_token") 
+    if token is None: 
         return {"message ": "you are not authorized to use this api"}
     
-    scheme, _, param = token.partition(" ") #separate 'bearer' from token
-    user = await get_current_user(param)
-    if user: #decode the token 
+    scheme, _, parameter = token.partition(" ")
+    user = await get_current_user(parameter)
+    if user: 
         resulted_quote_id, resulted_quote, resulted_author = generate_random_quote()
-        print(resulted_quote_id, resulted_quote, resulted_author)
         return templates.TemplateResponse("index.html", {"request": request, "quoteId": resulted_quote_id, "quote": resulted_quote, "author": resulted_author})
     return {"message ": "you are not authorized to use this api"}
 
 
 @app.get("/quote/random")
 async def get_random_quote(request: Request):
-
     return await check_authorization_token(request)
 
     
 @app.post("/quote/random")
 async def generate_auth_quote(request: Request):
-    form = await request.form() #press button
+    form = await request.form()
     return await check_authorization_token(request)
-
